@@ -30,6 +30,70 @@ def extract_features(headline):
         'has_ellipsis': '...' in headline,
     }
 
+def extract_headline_from_url(url):
+    """Scrape headline from a news article URL with cloud-safe fallbacks"""
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Accept-Encoding': 'gzip, deflate',
+        'Connection': 'keep-alive',
+    }
+    
+    try:
+        r = requests.get(url.strip(), headers=headers, timeout=10, allow_redirects=True)
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, 'html.parser')
+        
+        # Try in order of reliability
+        # 1. og:title (most consistent across sites)
+        og = soup.find('meta', property='og:title')
+        if og and og.get('content', '').strip():
+            return og['content'].strip()
+        
+        # 2. twitter:title
+        tw = soup.find('meta', attrs={'name': 'twitter:title'})
+        if tw and tw.get('content', '').strip():
+            return tw['content'].strip()
+        
+        # 3. h1
+        h1 = soup.find('h1')
+        if h1 and h1.get_text(strip=True):
+            return h1.get_text(strip=True)
+        
+        # 4. title tag, strip site name
+        title = soup.find('title')
+        if title:
+            t = title.get_text(strip=True)
+            # Remove site name suffix (e.g. "Headline | NDTV" → "Headline")
+            for sep in [' | ', ' - ', ' – ', ' — ']:
+                if sep in t:
+                    t = t.split(sep)[0].strip()
+            if len(t) > 20:
+                return t
+        
+        return None
+    
+    except requests.exceptions.Timeout:
+        return None
+    except requests.exceptions.SSLError:
+        # Retry without SSL verification (some Indian news sites have cert issues)
+        try:
+            r = requests.get(url.strip(), headers=headers, timeout=10, verify=False)
+            soup = BeautifulSoup(r.text, 'html.parser')
+            og = soup.find('meta', property='og:title')
+            if og and og.get('content', '').strip():
+                return og['content'].strip()
+            h1 = soup.find('h1')
+            if h1:
+                return h1.get_text(strip=True)
+            return None
+        except:
+            return None
+    except Exception:
+        return None
+
+
 def get_clickbait_dna(headline):
     """Returns list of (word/phrase, reason, severity) tuples found in headline"""
     h_lower = headline.lower()
